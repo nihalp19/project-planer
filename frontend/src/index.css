@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200;
+  }
+}
+
+@layer components {
+  /* Custom scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-gray-100 dark:bg-gray-800;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400 dark:bg-gray-500;
+  }
+
+  /* Gantt Chart Custom Styles */
+  .gantt-container {
+    @apply rounded-lg overflow-hidden;
+  }
+
+  /* Dark mode support for gantt-task-react */
+  .dark .gantt-container .gantt-table {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .dark .gantt-container .gantt-table-header {
+    @apply bg-gray-700 text-gray-100;
+  }
+
+  .dark .gantt-container .gantt-table-row {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .dark .gantt-container ._3uo97 {
+    @apply text-gray-100;
+  }
+
+  .dark .gantt-container .gantt-task-list {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .dark .gantt-container .gantt-task-list-header {
+    @apply bg-gray-700;
+  }
+
+  .dark .gantt-container ._3uo94 {
+    @apply bg-gray-900 text-gray-100;
+  }
+
+  .dark .gantt-container ._1v1aB,
+  .dark .gantt-container ._3T2Z6 {
+    @apply border-gray-700;
+  }
+
+  .dark .gantt-container ._2O8ze {
+    @apply bg-gray-700 text-gray-100;
+  }
+
+  .dark .gantt-container ._30lNB,
+  .dark .gantt-container ._3Kvxb {
+    @apply text-gray-400;
+  }
+
+  .dark .gantt-container ._3yUKx,
+  .dark .gantt-container ._19jgJ {
+    @apply text-gray-300;
+  }
+
+  .dark .gantt-container ._39SwY {
+    @apply bg-gray-800;
+  }
+
+  /* Ensure task bars are visible */
+  .gantt-container ._1IJkr {
+    @apply drop-shadow-sm;
+  }
+
+  /* Grid lines */
+  .dark .gantt-container ._2O8ze {
+    @apply border-gray-700;
+  }
+
+  /* Today line */
+  .gantt-container ._17uNr {
+    @apply bg-primary-500 opacity-30;
+  }
+
+  /* Arrow dependencies */
+  .gantt-container path[stroke] {
+    @apply stroke-gray-400 dark:stroke-gray-500;
+    stroke-width: 1.5;
+  }
+
+  /* Scrollbar for gantt */
+  .gantt-container::-webkit-scrollbar {
+    height: 12px;
+  }
+
+  .gantt-container::-webkit-scrollbar-track {
+    @apply bg-gray-100 dark:bg-gray-800 rounded;
+  }
+
+  .gantt-container::-webkit-scrollbar-thumb {
+    @apply bg-gray-300 dark:bg-gray-600 rounded;
+  }
+
+  .gantt-container::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-400 dark:bg-gray-500;
+  }
+}
+
