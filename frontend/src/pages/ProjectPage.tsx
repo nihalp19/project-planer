@@ -32,7 +32,7 @@ const ProjectPage = () => {
   const [taskName, setTaskName] = useState('');
   const [taskDescription, setTaskDescription] = useState('');
   const [duration, setDuration] = useState('1');
-  const [assignee, setAssignee] = useState('');
+  const [assignedTo, setAssignedTo] = useState<string[]>([]);
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [inviteEmail, setInviteEmail] = useState('');
   const [userSearchResults, setUserSearchResults] = useState<User[]>([]);
@@ -274,6 +274,14 @@ const ProjectPage = () => {
     return currentMember?.role === 'owner' || currentMember?.role === 'admin';
   };
 
+  const canAssignTasks = () => {
+    if (!team || !currentUser) return false;
+    const currentMember = team.members.find(m => 
+      (typeof m.user === 'object' ? m.user._id : m.user) === currentUser._id
+    );
+    return currentMember?.role === 'owner' || currentMember?.role === 'editor' || currentMember?.role === 'admin';
+  };
+
   const isOwner = (member: any) => {
     return team?.owner.toString() === 
       (typeof member.user === 'object' ? member.user._id : member.user);
@@ -350,14 +358,14 @@ const ProjectPage = () => {
         projectId: projectId!,
         name: taskName,
         duration: Number(duration),
-        assignedTo: assignee ? [assignee] : undefined,
+        assignedTo: assignedTo.length > 0 ? assignedTo : undefined,
         dependencies: dependencies.length > 0 ? dependencies : undefined,
       });
       setShowCreateTask(false);
       setTaskName('');
       setTaskDescription('');
       setDuration('1');
-      setAssignee('');
+      setAssignedTo([]);
       setDependencies([]);
       
       // Auto-calculate schedule after creating task
@@ -365,6 +373,10 @@ const ProjectPage = () => {
       await handleCalculateSchedule();
     } catch (error) {
       console.error('Failed to create task:', error);
+      addToast({
+        message: 'Failed to create task. Please try again.',
+        type: 'error',
+      });
     } finally {
       setCreating(false);
     }
@@ -381,6 +393,13 @@ const ProjectPage = () => {
             .map(dep => dep as string)
         : []
     );
+    // Set assigned users - handle both string[] and User[] formats
+    const assignedIds = Array.isArray(task.assignedTo)
+      ? task.assignedTo
+          .map(user => typeof user === 'string' ? user : user._id)
+          .filter(Boolean)
+      : [];
+    setAssignedTo(assignedIds);
     setShowEditTask(true);
   };
 
@@ -394,16 +413,22 @@ const ProjectPage = () => {
         name: taskName,
         duration: Number(duration),
         dependencies: dependencies.length > 0 ? dependencies : undefined,
+        assignedTo: assignedTo.length > 0 ? assignedTo : [],
       });
       setShowEditTask(false);
       setEditingTask(null);
       setTaskName('');
       setDuration('1');
+      setAssignedTo([]);
       setDependencies([]);
       await refetchTasks();
       await handleCalculateSchedule();
     } catch (error) {
       console.error('Failed to update task:', error);
+      addToast({
+        message: 'Failed to update task. Please try again.',
+        type: 'error',
+      });
     } finally {
       setUpdating(false);
     }
@@ -426,6 +451,38 @@ const ProjectPage = () => {
       await refetchTasks();
     } catch (error) {
       console.error('Failed to update task status:', error);
+      addToast({
+        message: 'Failed to update task status. Please try again.',
+        type: 'error',
+      });
+    }
+  };
+
+  const handleQuickAssign = async (taskId: string, userId: string) => {
+    try {
+      const task = tasks?.find(t => t._id === taskId);
+      if (!task) return;
+
+      const currentAssigned = Array.isArray(task.assignedTo)
+        ? task.assignedTo
+            .map(user => typeof user === 'string' ? user : user._id)
+            .filter(Boolean)
+        : [];
+
+      const newAssigned = currentAssigned.includes(userId)
+        ? currentAssigned.filter(id => id !== userId)
+        : [...currentAssigned, userId];
+
+      await taskService.updateTask(taskId, {
+        assignedTo: newAssigned.length > 0 ? newAssigned : [],
+      });
+      await refetchTasks();
+    } catch (error) {
+      console.error('Failed to assign task:', error);
+      addToast({
+        message: 'Failed to assign task. Please try again.',
+        type: 'error',
+      });
     }
   };
 
@@ -733,6 +790,87 @@ const ProjectPage = () => {
                         <span>Dependencies: {task.dependencies.length}</span>
                       )}
                     </div>
+                    {/* Assigned Users */}
+                    <div className="flex items-center gap-2 mt-3">
+                      {Array.isArray(task.assignedTo) && task.assignedTo.length > 0 ? (
+                        <>
+                          <span className="text-xs text-gray-500 dark:text-gray-400">Assigned to:</span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {task.assignedTo.map((user) => {
+                              const userObj = typeof user === 'object' ? user : null;
+                              const userId = typeof user === 'string' ? user : user._id;
+                              const userName = userObj?.name || 'Unknown';
+                              
+                              return (
+                                <div
+                                  key={userId}
+                                  className="flex items-center gap-1.5 px-2 py-1 bg-primary-100 dark:bg-primary-900/30 rounded-full text-xs"
+                                >
+                                  {userObj ? (
+                                    <Avatar user={userObj} size="sm" />
+                                  ) : (
+                                    <div className="w-5 h-5 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs">
+                                      {userName.charAt(0).toUpperCase()}
+                                    </div>
+                                  )}
+                                  <span className="text-primary-800 dark:text-primary-400">
+                                    {userName}
+                                  </span>
+                                  {canAssignTasks() && (
+                                    <button
+                                      onClick={() => handleQuickAssign(task._id, userId)}
+                                      className="ml-1 text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300"
+                                      title="Unassign"
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-400 dark:text-gray-500">No assignees</span>
+                      )}
+                    </div>
+                    {/* Assignment Dropdown */}
+                    {canAssignTasks() && team && (
+                      <div className="mt-3 relative">
+                        <div className="flex items-center gap-2">
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                handleQuickAssign(task._id, e.target.value);
+                                e.target.value = '';
+                              }
+                            }}
+                            className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                            title="Assign to team member"
+                          >
+                            <option value="">Assign to...</option>
+                            {team.members.map((member) => {
+                              const memberUser = typeof member.user === 'object' ? member.user : null;
+                              const memberId = typeof member.user === 'object' ? member.user._id : member.user;
+                              const memberName = memberUser?.name || 'Unknown';
+                              const currentAssigned = Array.isArray(task.assignedTo)
+                                ? task.assignedTo
+                                    .map(u => typeof u === 'string' ? u : u._id)
+                                    .filter(Boolean)
+                                : [];
+                              const isAssigned = currentAssigned.includes(memberId);
+                              
+                              return (
+                                <option key={memberId} value={memberId}>
+                                  {isAssigned ? `✓ ${memberName}` : memberName}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -863,11 +1001,77 @@ const ProjectPage = () => {
               )}
             </div>
           )}
+          {/* Assignment Section */}
+          {canAssignTasks() && team && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Assign to (Optional)
+              </label>
+              <Select
+                label=""
+                value=""
+                onChange={(e) => {
+                  if (e.target.value && !assignedTo.includes(e.target.value)) {
+                    setAssignedTo([...assignedTo, e.target.value]);
+                  }
+                }}
+                options={[
+                  { value: '', label: 'Select a team member...' },
+                  ...team.members
+                    .filter(member => {
+                      const memberId = typeof member.user === 'object' ? member.user._id : member.user;
+                      return !assignedTo.includes(memberId);
+                    })
+                    .map((member) => {
+                      const memberUser = typeof member.user === 'object' ? member.user : null;
+                      const memberId = typeof member.user === 'object' ? member.user._id : member.user;
+                      const memberName = memberUser?.name || 'Unknown';
+                      return {
+                        value: memberId,
+                        label: memberName,
+                      };
+                    }),
+                ]}
+              />
+              {assignedTo.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {assignedTo.map((userId) => {
+                    const member = team.members.find(m => {
+                      const memberId = typeof m.user === 'object' ? m.user._id : m.user;
+                      return memberId === userId;
+                    });
+                    const memberUser = member && typeof member.user === 'object' ? member.user : null;
+                    const memberName = memberUser?.name || 'Unknown';
+                    
+                    return (
+                      <span
+                        key={userId}
+                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-800 dark:text-primary-400 rounded text-sm"
+                      >
+                        {memberUser && <Avatar user={memberUser} size="sm" />}
+                        <span>{memberName}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAssignedTo(assignedTo.filter((id) => id !== userId))}
+                          className="hover:text-primary-900 dark:hover:text-primary-300"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex gap-3 justify-end">
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setShowCreateTask(false)}
+              onClick={() => {
+                setShowCreateTask(false);
+                setAssignedTo([]);
+              }}
             >
               Cancel
             </Button>
@@ -886,6 +1090,7 @@ const ProjectPage = () => {
           setEditingTask(null);
           setTaskName('');
           setDuration('1');
+          setAssignedTo([]);
           setDependencies([]);
         }}
         title="Edit Task"
@@ -953,6 +1158,69 @@ const ProjectPage = () => {
               )}
             </div>
           )}
+          {/* Assignment Section */}
+          {canAssignTasks() && team && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Assign to (Optional)
+              </label>
+              <Select
+                label=""
+                value=""
+                onChange={(e) => {
+                  if (e.target.value && !assignedTo.includes(e.target.value)) {
+                    setAssignedTo([...assignedTo, e.target.value]);
+                  }
+                }}
+                options={[
+                  { value: '', label: 'Select a team member...' },
+                  ...team.members
+                    .filter(member => {
+                      const memberId = typeof member.user === 'object' ? member.user._id : member.user;
+                      return !assignedTo.includes(memberId);
+                    })
+                    .map((member) => {
+                      const memberUser = typeof member.user === 'object' ? member.user : null;
+                      const memberId = typeof member.user === 'object' ? member.user._id : member.user;
+                      const memberName = memberUser?.name || 'Unknown';
+                      return {
+                        value: memberId,
+                        label: memberName,
+                      };
+                    }),
+                ]}
+              />
+              {assignedTo.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {assignedTo.map((userId) => {
+                    const member = team.members.find(m => {
+                      const memberId = typeof m.user === 'object' ? m.user._id : m.user;
+                      return memberId === userId;
+                    });
+                    const memberUser = member && typeof member.user === 'object' ? member.user : null;
+                    const memberName = memberUser?.name || 'Unknown';
+                    
+                    return (
+                      <span
+                        key={userId}
+                        className="inline-flex items-center gap-1.5 px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-800 dark:text-primary-400 rounded text-sm"
+                      >
+                        {memberUser && <Avatar user={memberUser} size="sm" />}
+                        <span>{memberName}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAssignedTo(assignedTo.filter((id) => id !== userId))}
+                          className="hover:text-primary-900 dark:hover:text-primary-300"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex gap-3 justify-end">
             <Button
               type="button"
@@ -960,6 +1228,10 @@ const ProjectPage = () => {
               onClick={() => {
                 setShowEditTask(false);
                 setEditingTask(null);
+                setTaskName('');
+                setDuration('1');
+                setAssignedTo([]);
+                setDependencies([]);
               }}
             >
               Cancel
