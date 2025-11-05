@@ -133,6 +133,39 @@ const ProjectPage = () => {
     };
   }, [socket, projectId, on, off, refetchTasks, refetchProject, navigate, addToast]);
 
+  // Listen for task assignment notifications (personal room events)
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleTaskAssigned = (data: {
+      taskId: string;
+      taskName: string;
+      projectId: string;
+      projectName: string;
+      assignedBy: string;
+      assignedByEmail: string;
+    }) => {
+      console.log('[Socket] Task assigned to you:', data);
+      
+      // Show toast notification
+      addToast({
+        message: `${data.assignedBy} assigned you to: ${data.taskName}`,
+        type: 'success',
+      });
+
+      // Refresh tasks if we're on the same project page
+      if (data.projectId === projectId) {
+        refetchTasks();
+      }
+    };
+
+    on('task:assigned', handleTaskAssigned);
+
+    return () => {
+      off('task:assigned', handleTaskAssigned);
+    };
+  }, [socket, on, off, projectId, refetchTasks, addToast]);
+
   // Debounced user search
   useEffect(() => {
     if (!inviteEmail || inviteEmail.length < 2) {
@@ -180,6 +213,18 @@ const ProjectPage = () => {
     socket.emit('join:team', team._id);
     console.log(`[Socket] Joined team room: ${team._id}`);
     
+    const handleMemberJoined = (data: any) => {
+      console.log('[Socket] Member joined team:', data);
+      // Refresh team to show new member in Team Management modal
+      refetchTeam();
+      if (data.teamId === team._id) {
+        addToast({
+          message: `${data.member?.user?.name || 'A new member'} joined the team`,
+          type: 'success',
+        });
+      }
+    };
+    
     const handleMemberRoleChanged = () => {
       console.log('[Socket] Member role changed, refetching team...');
       refetchTeam();
@@ -198,10 +243,12 @@ const ProjectPage = () => {
       }
     };
     
+    on('team:member_joined', handleMemberJoined);
     on('team:member_role_changed', handleMemberRoleChanged);
     on('team:member_removed', handleMemberRemoved);
     
     return () => {
+      off('team:member_joined', handleMemberJoined);
       off('team:member_role_changed', handleMemberRoleChanged);
       off('team:member_removed', handleMemberRemoved);
       socket.emit('leave:team', team._id);

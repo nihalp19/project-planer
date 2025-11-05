@@ -1,5 +1,5 @@
 // InvitationsPage.tsx - Updated version
-import { useQuery, useQueryClient } from '@tanstack/react-query'; // Add useQueryClient
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Mail, Check, X, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -7,34 +7,59 @@ import { invitationService } from '@/services/invitationService';
 import { Button, Card, Loading, Avatar } from '@/components/common';
 import { formatRelative } from '@/utils/dateUtils';
 import { useToastStore } from '@/stores/toastStore';
-import { useState } from 'react';
+import { useSocketStore } from '@/stores/socketStore';
+import { useState, useEffect } from 'react';
 
 const InvitationsPage = () => {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { addToast } = useToastStore();
-  const queryClient = useQueryClient(); // Add this
+  const queryClient = useQueryClient();
+  const { on, off, emit, isConnected } = useSocketStore();
 
   const { data: invitations, isLoading, refetch } = useQuery({
     queryKey: ['invitations'],
     queryFn: () => invitationService.getInvitations(),
   });
 
+  // Listen for team:joined event when user accepts invitation
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const handleTeamJoined = (data: { teamId: string; team: any }) => {
+      console.log('[Invitations] Team joined via socket:', data);
+      
+      // Join the team room immediately
+      emit('join:team', data.teamId);
+      
+      // Invalidate queries to refresh teams and projects
+      queryClient.invalidateQueries({ queryKey: ['my-teams'] });
+      queryClient.invalidateQueries({ queryKey: ['my-projects'] });
+      queryClient.invalidateQueries({ queryKey: ['invitations'] });
+      
+      // Show success message
+      addToast({
+        message: `Joined ${data.team.name}! You can now see projects from this team.`,
+        type: 'success',
+      });
+    };
+
+    on('team:joined', handleTeamJoined);
+
+    return () => {
+      off('team:joined', handleTeamJoined);
+    };
+  }, [isConnected, on, off, emit, queryClient, addToast]);
+
   const handleAccept = async (id: string) => {
     setProcessingId(id);
     try {
       await invitationService.acceptInvitation(id);
       
-      addToast({
-        message: 'Team invitation accepted! You can now see projects from this team.',
-        type: 'success',
-      });
-      
-      // ✅ FIX: Refresh both invitations and notifications
-      await Promise.all([
-        refetch(),
-        queryClient.invalidateQueries({ queryKey: ['notifications'] })
-      ]);
+      // The socket event handler will handle the UI updates and toast
+      // But we still refresh invitations list
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
       
       // Navigate to dashboard after short delay to show the toast
       setTimeout(() => {

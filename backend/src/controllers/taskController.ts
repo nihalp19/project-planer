@@ -5,7 +5,7 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { calculateProjectSchedule, validateDependency } from '../services/scheduleService';
 import { createNotification } from '../services/notificationService';
 import { sendTaskAssignmentEmail } from '../services/emailService';
-import { emitToProject } from '../socket';
+import { emitToProject, emitToUser } from '../socket';
 
 // Create task
 export const createTask = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -74,6 +74,21 @@ export const createTask = asyncHandler(async (req: AuthRequest, res: Response) =
           projectWithName.name,
           currentUser.name
         ).catch(console.error);
+
+        // Emit real-time event to assigned user's personal room
+        try {
+          emitToUser(assigneeId.toString(), 'task:assigned', {
+            taskId: task._id.toString(),
+            taskName: name,
+            projectId: projectId.toString(),
+            projectName: projectWithName.name,
+            assignedBy: currentUser.name,
+            assignedByEmail: currentUser.email,
+          });
+        } catch (socketError) {
+          console.error('Socket emit error for task assignment:', socketError);
+          // Don't throw error, just log it - notifications were still sent
+        }
       }
     }
   }
@@ -192,6 +207,21 @@ export const updateTask = asyncHandler(async (req: AuthRequest, res: Response) =
             project.name,
             currentUser.name
           ).catch(console.error);
+
+          // Emit real-time event to newly assigned user's personal room
+          try {
+            emitToUser(assigneeId.toString(), 'task:assigned', {
+              taskId: task._id.toString(),
+              taskName: task.name,
+              projectId: task.project.toString(),
+              projectName: project.name,
+              assignedBy: currentUser.name,
+              assignedByEmail: currentUser.email,
+            });
+          } catch (socketError) {
+            console.error('Socket emit error for task assignment:', socketError);
+            // Don't throw error, just log it - notifications were still sent
+          }
         }
       }
     }

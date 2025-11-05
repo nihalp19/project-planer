@@ -1,10 +1,11 @@
 import { Response } from 'express';
-import { Team, Invitation, User } from '../models';
+import { Team, Invitation, User, Project } from '../models';
 import { AuthRequest } from '../types';
 import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { generateInvitationToken } from '../utils/password';
 import { sendTeamInvitationEmail } from '../services/emailService';
 import { createNotification } from '../services/notificationService';
+import { emitToTeam, emitToUser } from '../socket';
 
 // Create team
 export const createTeam = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -281,12 +282,38 @@ export const removeMember = asyncHandler(async (req: AuthRequest, res: Response)
   await team.save();
   await team.populate('members.user', 'name email avatar');
 
-  // Emit real-time event to all users in team room
-  const { emitToTeam } = require('../socket');
-  emitToTeam(id, 'team:member_removed', { 
-    team, 
-    removedUserId: targetUserId 
-  });
+  // Get all projects in this team that the removed user will lose access to
+  const teamProjects = await Project.find({ team: id }).select('_id name');
+
+  // Emit real-time events
+  try {
+    // Emit to team room that member was removed
+    emitToTeam(id, 'team:member_removed', { 
+      team, 
+      removedUserId: targetUserId 
+    });
+
+    // Emit to the removed user's personal room that they left the team
+    emitToUser(targetUserId, 'team:left', {
+      teamId: id,
+      teamName: team.name,
+    });
+
+    // Emit project access revoked events for all projects in this team
+    teamProjects.forEach((project) => {
+      emitToUser(targetUserId, 'project:access_revoked', {
+        projectId: project._id.toString(),
+        projectName: project.name,
+        teamId: id,
+        teamName: team.name,
+      });
+    });
+
+    console.log(`✅ Emitted real-time events for removed member: ${targetUserId} from team: ${team.name}`);
+  } catch (socketError) {
+    console.error('Socket emit error:', socketError);
+    // Don't throw error, just log it - the member was still removed
+  }
 
   res.json({
     message: 'Member removed successfully',
