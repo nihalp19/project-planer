@@ -6,64 +6,30 @@ import { emitToProject, emitToTeam } from '../socket';
 
 // Create project
 export const createProject = asyncHandler(async (req: AuthRequest, res: Response) => {
-  const { name, description, teamId, startDate } = req.body;
+  const { name, description, startDate } = req.body;
   const userId = req.user?.userId;
 
-  console.log('[Create Project] Request received:', { name, description, teamId, userId });
+  console.log('[Create Project] Request received:', { name, description, userId });
 
-  let finalTeamId = teamId;
-
-  // If no teamId provided, use user's personal workspace
-  if (!finalTeamId) {
-    let personalWorkspace = await Team.findOne({
-      owner: userId,
-      isPersonal: true,
-    });
-
-    console.log('[Create Project] Personal workspace found:', personalWorkspace?._id);
-
-    // If personal workspace doesn't exist, create it
-    if (!personalWorkspace) {
-      console.log('[Create Project] Creating personal workspace for user:', userId);
-      personalWorkspace = await Team.create({
-        name: 'Personal Workspace',
-        owner: userId,
-        isPersonal: true,
-        members: [
-          {
-            user: userId,
-            role: 'owner',
-            joinedAt: new Date(),
-          },
-        ],
-        projects: [],
-      });
-      console.log('[Create Project] Personal workspace created:', personalWorkspace._id);
-    }
-
-    finalTeamId = personalWorkspace._id;
-  }
-
-  // Verify team exists and user is a member
-  const team = await Team.findById(finalTeamId);
-  if (!team) {
-    throw new AppError('Team not found', 404);
-  }
-
-  const member = team.members.find((m) => m.user.toString() === userId);
-  if (!member) {
-    throw new AppError('You must be a team member to create projects', 403);
-  }
-
-  // Viewers can't create projects
-  if (member.role === 'viewer') {
-    throw new AppError('Viewers cannot create projects', 403);
-  }
+  // Always create a dedicated team for this project
+  const projectTeam = await Team.create({
+    name: `${name} Team`,
+    owner: userId!,
+    isPersonal: false,
+    members: [
+      {
+        user: userId!,
+        role: 'owner',
+        joinedAt: new Date(),
+      },
+    ],
+    projects: [],
+  });
 
   const project = await Project.create({
     name,
     description,
-    team: finalTeamId,
+    team: projectTeam._id,
     startDate: startDate || new Date(),
     createdBy: userId,
     tasks: [],
@@ -72,13 +38,13 @@ export const createProject = asyncHandler(async (req: AuthRequest, res: Response
   console.log('[Create Project] Project created:', project._id);
 
   // Add project to team
-  team.projects.push(project._id);
-  await team.save();
+  projectTeam.projects.push(project._id);
+  await projectTeam.save();
 
   await project.populate('createdBy', 'name email avatar');
 
   // Emit real-time event to all team members
-  emitToTeam(finalTeamId.toString(), 'project:created', { project });
+  emitToTeam(projectTeam._id.toString(), 'project:created', { project });
 
   console.log('[Create Project] Success - returning project');
 
@@ -212,6 +178,24 @@ export const deleteProject = asyncHandler(async (req: AuthRequest, res: Response
   const teamId = project.team.toString();
   emitToTeam(teamId, 'project:deleted', { projectId: id });
 
+  // Emit access revoked to all team members' personal rooms
+  const team = await Team.findById(teamId);
+  if (team) {
+    try {
+      const { emitToUser } = require('../socket');
+      for (const member of team.members) {
+        emitToUser(member.user.toString(), 'project:access_revoked', {
+          projectId: id,
+          projectName: project.name,
+          teamId: teamId,
+          teamName: team.name,
+        });
+      }
+    } catch (e) {
+      console.error('[Delete Project] Failed to emit access_revoked to members', e);
+    }
+  }
+
   // Remove project from team
   await Team.findByIdAndUpdate(project.team, {
     $pull: { projects: id },
@@ -219,13 +203,11 @@ export const deleteProject = asyncHandler(async (req: AuthRequest, res: Response
 
   await project.deleteOne();
 
-  // Check if team has no more projects and auto-delete if not personal
-  const updatedTeam = await Team.findById(project.team);
-  if (updatedTeam && 
-      !updatedTeam.isPersonal && 
-      updatedTeam.projects.length === 0) {
-    console.log(`[Auto-delete] Team ${updatedTeam._id} is empty and not personal, deleting...`);
-    await updatedTeam.deleteOne();
+  // Always delete the associated team
+  try {
+    await Team.findByIdAndDelete(teamId);
+  } catch (e) {
+    console.error('[Delete Project] Failed to delete team', e);
   }
 
   res.json({ message: 'Project deleted successfully' });

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Plus, Calendar, RefreshCw, Edit2, Trash2, Settings, Users, UserPlus, Mail } from 'lucide-react';
@@ -21,6 +21,7 @@ const ProjectPage = () => {
   const { socket, on, off } = useSocketStore();
   const { addToast } = useToastStore();
   const { user: currentUser } = useAuthStore();
+  const queryClient = useQueryClient();
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showEditTask, setShowEditTask] = useState(false);
   const [showEditProject, setShowEditProject] = useState(false);
@@ -101,9 +102,13 @@ const ProjectPage = () => {
     };
 
     // Listen for real-time project events
-    const handleProjectUpdated = () => {
-      console.log('[Socket] Project updated, refetching project...');
+    const handleProjectUpdated = (data?: { projectId?: string }) => {
+      console.log('[Socket] Project updated, refetching project and tasks...', data);
       refetchProject();
+      // If this update pertains to the current project, also ensure tasks are refreshed
+      if (!data || !data.projectId || data.projectId === projectId) {
+        refetchTasks();
+      }
     };
 
     const handleProjectDeleted = () => {
@@ -514,9 +519,21 @@ const ProjectPage = () => {
 
   const handleDeleteProject = async () => {
     try {
+      if (socket && projectId) {
+        socket.emit('leave:project', projectId);
+      }
+
       await projectService.deleteProject(projectId!);
-      // Navigate to dashboard after deletion
+
+      // Optimistically remove project from cache
+      queryClient.setQueryData(['my-projects'], (oldData: any) => {
+        if (!oldData) return oldData;
+        return oldData.filter((p: any) => p._id !== projectId);
+      });
+
+      // Navigate then invalidate to force fresh fetch
       navigate('/dashboard');
+      queryClient.invalidateQueries({ queryKey: ['my-projects'] });
     } catch (error) {
       console.error('Failed to delete project:', error);
     }

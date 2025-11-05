@@ -5,7 +5,7 @@ import { AppError, asyncHandler } from '../middleware/errorHandler';
 import { calculateProjectSchedule, validateDependency } from '../services/scheduleService';
 import { createNotification } from '../services/notificationService';
 import { sendTaskAssignmentEmail } from '../services/emailService';
-import { emitToProject, emitToUser } from '../socket';
+import { emitToProject, emitToTeam, emitToUser } from '../socket';
 
 // Create task
 export const createTask = asyncHandler(async (req: AuthRequest, res: Response) => {
@@ -45,6 +45,14 @@ export const createTask = asyncHandler(async (req: AuthRequest, res: Response) =
 
   // Recalculate schedule
   await calculateProjectSchedule(projectId);
+
+  // Inform listeners project timeline/status may have changed
+  try {
+    emitToProject(projectId.toString(), 'project:updated', { projectId: projectId.toString() });
+    emitToTeam(project.team.toString(), 'project:updated', { projectId: projectId.toString() });
+  } catch (e) {
+    console.error('Socket emit error for project:updated after task create', e);
+  }
 
   // Populate task details
   await task.populate('assignedTo dependencies createdBy', 'name email avatar');
@@ -95,6 +103,12 @@ export const createTask = asyncHandler(async (req: AuthRequest, res: Response) =
 
   // Emit real-time event to all users in project room
   emitToProject(projectId.toString(), 'task:created', { task });
+  // Emit to team room so owners/admins/editors see updates even if not in project room
+  try {
+    emitToTeam(project.team.toString(), 'task:created', { task, projectId: projectId.toString() });
+  } catch (e) {
+    console.error('Socket emit error for team task:created', e);
+  }
 
   res.status(201).json({
     message: 'Task created successfully',
@@ -232,12 +246,31 @@ export const updateTask = asyncHandler(async (req: AuthRequest, res: Response) =
   // Recalculate schedule if needed
   if (scheduleNeedsRecalc) {
     await calculateProjectSchedule(task.project);
+    // Notify listeners that project changed (e.g., timeline/status)
+    try {
+      const proj = await Project.findById(task.project);
+      if (proj) {
+        emitToProject(task.project.toString(), 'project:updated', { projectId: task.project.toString() });
+        emitToTeam(proj.team.toString(), 'project:updated', { projectId: task.project.toString() });
+      }
+    } catch (e) {
+      console.error('Socket emit error for project:updated after schedule recalc', e);
+    }
   }
 
   await task.populate('assignedTo dependencies createdBy', 'name email avatar');
 
   // Emit real-time event to all users in project room
   emitToProject(task.project.toString(), 'task:updated', { task });
+  // Emit to team room as well
+  try {
+    const projForUpdate = await Project.findById(task.project);
+    if (projForUpdate) {
+      emitToTeam(projForUpdate.team.toString(), 'task:updated', { task, projectId: task.project.toString() });
+    }
+  } catch (e) {
+    console.error('Socket emit error for team task:updated', e);
+  }
 
   res.json({
     message: 'Task updated successfully',
@@ -280,6 +313,18 @@ export const deleteTask = asyncHandler(async (req: AuthRequest, res: Response) =
 
   // Emit real-time event to all users in project room
   emitToProject(projectId.toString(), 'task:deleted', { taskId: id });
+  // Emit to team room as well
+  try {
+    const projForDelete = await Project.findById(projectId);
+    if (projForDelete) {
+      emitToTeam(projForDelete.team.toString(), 'task:deleted', { taskId: id, projectId: projectId.toString() });
+      // Also let listeners know project changed due to schedule recalculation
+      emitToTeam(projForDelete.team.toString(), 'project:updated', { projectId: projectId.toString() });
+      emitToProject(projectId.toString(), 'project:updated', { projectId: projectId.toString() });
+    }
+  } catch (e) {
+    console.error('Socket emit error for team task:deleted', e);
+  }
 
   res.json({ message: 'Task deleted successfully' });
 });

@@ -124,6 +124,9 @@ const DashboardPage = () => {
         message: `Access to "${data.projectName}" has been revoked.`,
         type: 'info',
       });
+
+      // Ensure fresh list
+      queryClient.invalidateQueries({ queryKey: ['my-projects'] });
     };
 
     const handleTaskAssigned = (data: {
@@ -148,11 +151,24 @@ const DashboardPage = () => {
     on('project:access_revoked', handleProjectAccessRevoked);
     on('task:assigned', handleTaskAssigned);
 
+    // Team-level task updates: ensure dashboards stay fresh if any list depends on them later
+    const handleTeamTaskEvent = (data: { projectId: string }) => {
+      // Invalidate potential caches tied to this project
+      queryClient.invalidateQueries({ queryKey: ['tasks', data.projectId] });
+      queryClient.invalidateQueries({ queryKey: ['project', data.projectId] });
+    };
+    on('task:created', handleTeamTaskEvent);
+    on('task:updated', handleTeamTaskEvent);
+    on('task:deleted', handleTeamTaskEvent);
+
     return () => {
       off('team:joined', handleTeamJoined);
       off('team:left', handleTeamLeft);
       off('project:access_revoked', handleProjectAccessRevoked);
       off('task:assigned', handleTaskAssigned);
+      off('task:created', handleTeamTaskEvent);
+      off('task:updated', handleTeamTaskEvent);
+      off('task:deleted', handleTeamTaskEvent);
     };
   }, [isConnected, on, off, emit, refetchTeams, refetch, queryClient, addToast]);
 
@@ -192,6 +208,7 @@ const DashboardPage = () => {
         return oldData.filter(project => project._id !== data.projectId);
       });
       refetch();
+      queryClient.invalidateQueries({ queryKey: ['my-projects'] });
     };
 
     on('project:created', handleProjectCreated);
