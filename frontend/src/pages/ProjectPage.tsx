@@ -49,10 +49,11 @@ const ProjectPage = () => {
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
 
-  const { data: project, isLoading: loadingProject, refetch: refetchProject } = useQuery({
+  const { data: project, isLoading: loadingProject, refetch: refetchProject, error: projectError } = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => projectService.getProject(projectId!),
     enabled: !!projectId,
+    retry: false,
   });
 
   const { data: tasks, isLoading: loadingTasks, refetch: refetchTasks } = useQuery({
@@ -165,6 +166,78 @@ const ProjectPage = () => {
       off('task:assigned', handleTaskAssigned);
     };
   }, [socket, on, off, projectId, refetchTasks, addToast]);
+
+  // Listen for team removal and project access revocation (personal room events)
+  // Set up listeners even when project is loading, using projectId from URL params
+  useEffect(() => {
+    if (!socket || !projectId) return;
+
+    const handleTeamLeft = (data: { teamId: string; teamName: string }) => {
+      console.log('[Socket] Team left (personal room):', data);
+      
+      // Only redirect if project is loaded and belongs to the removed team
+      // If project isn't loaded yet, wait for project:access_revoked event which will
+      // be sent for each project from that team (including this one if applicable)
+      if (project) {
+        const projectTeamId = typeof project.team === 'string' 
+          ? project.team 
+          : project.team?._id;
+        
+        if (projectTeamId === data.teamId) {
+          addToast({
+            message: `You were removed from ${data.teamName}. Redirecting to dashboard...`,
+            type: 'info',
+          });
+          navigate('/dashboard');
+        }
+      }
+      // If project not loaded, we'll get project:access_revoked if this project
+      // belongs to the removed team, which will handle the redirect
+    };
+
+    const handleProjectAccessRevoked = (data: {
+      projectId: string;
+      projectName: string;
+      teamId: string;
+      teamName: string;
+    }) => {
+      console.log('[Socket] Project access revoked (personal room):', data);
+      
+      // Check if this is the current project (using projectId from URL params)
+      if (data.projectId === projectId) {
+        addToast({
+          message: `Access to "${data.projectName}" has been revoked. Redirecting to dashboard...`,
+          type: 'info',
+        });
+        navigate('/dashboard');
+      }
+    };
+
+    on('team:left', handleTeamLeft);
+    on('project:access_revoked', handleProjectAccessRevoked);
+
+    return () => {
+      off('team:left', handleTeamLeft);
+      off('project:access_revoked', handleProjectAccessRevoked);
+    };
+  }, [socket, on, off, project, projectId, navigate, addToast]);
+
+  // Handle project query errors (403/404) - redirect to dashboard
+  useEffect(() => {
+    if (projectError) {
+      const axiosError = projectError as any;
+      const status = axiosError?.response?.status;
+      
+      // If access denied (403) or not found (404), redirect to dashboard
+      if (status === 403 || status === 404) {
+        addToast({
+          message: 'Access to this project has been revoked or the project no longer exists.',
+          type: 'info',
+        });
+        navigate('/dashboard');
+      }
+    }
+  }, [projectError, navigate, addToast]);
 
   // Debounced user search
   useEffect(() => {

@@ -80,6 +80,18 @@ const DashboardPage = () => {
       // Leave the team room
       emit('leave:team', data.teamId);
       
+      // Immediately remove all projects from this team from cache
+      queryClient.setQueryData(['my-projects'], (oldData: Project[] | undefined) => {
+        if (!oldData) return oldData;
+        return oldData.filter(project => {
+          // Handle both string and object team references
+          const projectTeamId = typeof project.team === 'string' 
+            ? project.team 
+            : project.team?._id;
+          return projectTeamId !== data.teamId;
+        });
+      });
+      
       // Refresh teams list and projects list
       refetchTeams();
       refetch();
